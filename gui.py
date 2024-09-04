@@ -1,71 +1,113 @@
 import tkinter as tk
 from tkinter import messagebox
-from clips import Environment
+import clips
 
-class TravelExpertSystem:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Sistema Experto de Recomendaciones de Viajes")
-        
-        # Crear interfaz
-        tk.Label(root, text="Preferencias de viaje").grid(row=0, column=0, columnspan=2, padx=10, pady=10)
-        
-        tk.Label(root, text="Tipo de preferencia:").grid(row=1, column=0, padx=10, pady=5)
-        
-        # Variable para almacenar la preferencia seleccionada
-        self.preference = tk.StringVar(value="beach")  # Valor por defecto
-        
-        # Botones de radio para seleccionar la preferencia
-        preferences = [("Playa", "beach"), ("Montaña", "mountain"), ("Ciudad", "city"), 
-                       ("Aventura", "adventure"), ("Cultura", "culture")]
-        
-        for index, (text, value) in enumerate(preferences):
-            tk.Radiobutton(root, text=text, variable=self.preference, value=value).grid(row=1, column=1+index, padx=5, pady=5)
-        
-        tk.Label(root, text="Presupuesto:").grid(row=2, column=0, padx=10, pady=5)
-        self.budget_entry = tk.Entry(root)
-        self.budget_entry.grid(row=2, column=1, padx=10, pady=5)
-        
-        tk.Button(root, text="Obtener Recomendaciones", command=self.get_recommendations).grid(row=3, column=0, columnspan=6, padx=10, pady=10)
-        
-        self.results_text = tk.Text(root, height=10, width=50)
-        self.results_text.grid(row=4, column=0, columnspan=6, padx=10, pady=10)
-        
-    def get_recommendations(self):
-        # Inicializar el entorno CLIPS
-        env = Environment()
-        env.load("rules.clp")
-        
-        # Obtener entradas del usuario
-        preference = self.preference.get()
-        budget = self.budget_entry.get()
-        
-        try:
-            budget = int(budget)
-        except ValueError:
-            messagebox.showerror("Error", "Presupuesto debe ser un número entero.")
-            return
-        
-        # Insertar hechos
-        env.assert_string(f'(client (preference {preference}))')
-        env.assert_string(f'(client (budget {budget}))')
-        
-        # Ejecutar el motor de inferencia
-        env.run()
-        
-        # Obtener y mostrar resultados
-        results = env.eval('(find-all-facts ((?f destination)) TRUE)')
-        self.results_text.delete(1.0, tk.END)
-        
-        if not results:
-            self.results_text.insert(tk.END, "No hay recomendaciones disponibles para los criterios proporcionados.")
-        else:
-            for result in results:
-                destination = result[0]
-                name = destination.get('name', 'Desconocido')
-                self.results_text.insert(tk.END, f"Destino recomendado: {name}\n")
-        
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = TravelExpertSystem(root)
-    root.mainloop()
+# Definir los rangos de presupuesto en función de las categorías
+presupuesto_rangos = {
+    "bajo 0 - 1000": (0, 1000),
+    "medio-bajo 1001 - 3000": (1001, 3000),
+    "medio 3001 - 5000": (3001, 5000),
+    "medio-alto 5001 - 8000": (5001, 8000),
+    "alto 8001 - 15000": (8001, 15000),
+}
+
+def cargar_reglas(env, archivo_reglas):
+    """
+    Carga un archivo de reglas en el entorno CLIPS.
+    """
+    try:
+        env.load(archivo_reglas)
+        print("Reglas cargadas exitosamente.")
+    except clips.CLIPSError as error:
+        print(f"Fallo al cargar reglas: {error}")
+
+def agregar_hecho_cliente(env, nombre, presupuesto_min, presupuesto_max, tipo_viaje, preferencia):
+    """
+    Inserta un hecho en CLIPS basado en la información del cliente.
+    """
+    hecho = (f'(cliente (nombre "{nombre}") '
+             f'(presupuesto-min {presupuesto_min}) (presupuesto-max {presupuesto_max}) '
+             f'(tipo-viaje {tipo_viaje}) (preferencia {preferencia}))')
+    env.assert_string(hecho)
+
+def obtener_recomendaciones(env):
+    """
+    Ejecuta la inferencia y obtiene las recomendaciones.
+    """
+    env.run()
+    recomendaciones = []
+    for hecho in env.facts():
+        if hecho.template.name == "salida":
+            recomendaciones.append(hecho["mensaje"])
+    return recomendaciones
+
+def mostrar_dialogo_recomendaciones(recomendaciones):
+    """
+    Muestra las recomendaciones en un cuadro de mensaje.
+    """
+    if recomendaciones:
+        mensaje = "\n".join(recomendaciones)
+    else:
+        mensaje = "No se encontraron recomendaciones para los datos proporcionados."
+    messagebox.showinfo("Recomendaciones", mensaje)
+
+def procesar_formulario():
+    """
+    Recoge los datos del formulario y obtiene las recomendaciones.
+    """
+    nombre = entrada_nombre.get().strip()
+    categoria_presupuesto = categoria_presupuesto_seleccion.get()
+    tipo_viaje = tipo_viaje_seleccion.get()
+    preferencia = preferencia_seleccion.get()
+
+    if not (nombre and categoria_presupuesto and tipo_viaje and preferencia):
+        messagebox.showwarning("Advertencia", "Todos los campos son obligatorios.")
+        return
+
+    presupuesto_min, presupuesto_max = presupuesto_rangos[categoria_presupuesto]
+
+    entorno_clips = clips.Environment()
+    cargar_reglas(entorno_clips, 'rules.clp')
+    agregar_hecho_cliente(entorno_clips, nombre, presupuesto_min, presupuesto_max, tipo_viaje, preferencia)
+    recomendaciones = obtener_recomendaciones(entorno_clips)
+    mostrar_dialogo_recomendaciones(recomendaciones)
+
+# Configuración de la ventana principal
+ventana_principal = tk.Tk()
+ventana_principal.title("Sistema de Recomendaciones de Viajes")
+ventana_principal.geometry("450x350")
+
+# Variables de estado
+tipo_viaje_seleccion = tk.StringVar(value="aventura")
+preferencia_seleccion = tk.StringVar(value="playa")
+categoria_presupuesto_seleccion = tk.StringVar(value="bajo 0 - 1000")
+
+# Etiquetas y campos de entrada
+tk.Label(ventana_principal, text="Nombre del Cliente:", font=("Arial", 12)).pack(pady=5)
+entrada_nombre = tk.Entry(ventana_principal, font=("Arial", 12))
+entrada_nombre.pack(pady=5)
+
+tk.Label(ventana_principal, text="Categoría de Presupuesto:", font=("Arial", 12)).pack(pady=5)
+categorias_presupuesto = list(presupuesto_rangos.keys())
+menu_categoria_presupuesto = tk.OptionMenu(ventana_principal, categoria_presupuesto_seleccion, *categorias_presupuesto)
+menu_categoria_presupuesto.config(font=("Arial", 12))
+menu_categoria_presupuesto.pack(pady=5)
+
+tk.Label(ventana_principal, text="Tipo de Viaje:", font=("Arial", 12)).pack(pady=5)
+opciones_tipo_viaje = ["aventura", "cultura", "relajación", "gastronomía", "ecoturismo"]
+menu_tipo_viaje = tk.OptionMenu(ventana_principal, tipo_viaje_seleccion, *opciones_tipo_viaje)
+menu_tipo_viaje.config(font=("Arial", 12))
+menu_tipo_viaje.pack(pady=5)
+
+tk.Label(ventana_principal, text="Preferencia:", font=("Arial", 12)).pack(pady=5)
+opciones_preferencia = ["playa", "montaña", "ciudad", "selva", "desierto"]
+menu_preferencia = tk.OptionMenu(ventana_principal, preferencia_seleccion, *opciones_preferencia)
+menu_preferencia.config(font=("Arial", 12))
+menu_preferencia.pack(pady=5)
+
+# Botón para procesar los datos
+boton_recomendacion = tk.Button(ventana_principal, text="Obtener Recomendación", command=procesar_formulario, font=("Arial", 12))
+boton_recomendacion.pack(pady=20)
+
+# Ejecutar la interfaz gráfica
+ventana_principal.mainloop()
